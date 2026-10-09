@@ -1,4 +1,4 @@
-# MP4/XAVC-S-Rettung nach Akku-Ausfall
+# Rettung beschädigter Sony-Kameradateien (MP4/XAVC S und MXF/XAVC-Intra)
 
 Rekonstruiert eine Sony-Kameradatei, bei der die Aufnahme durch Akku-Ausfall
 abbrach: Dann fehlt der Index (`moov`) am Dateiende, oft ist zusätzlich der
@@ -41,3 +41,16 @@ Danach prüfen: `ffmpeg -v error -i OUT -f null -` (0 = sauber; einzelne
 „corrupt decoded frame"-*Warnungen* = original angeknackste Frames, unkritisch).
 `-xerror` NICHT als Erfolgskriterium nehmen – es bricht schon bei solchen
 Warnungen ab.
+
+## Zweiter Fall: nicht abgeschlossene Sony-MXF (XAVC-Intra)
+Bricht bei einer Sony FS7 II die Aufnahme ab, besteht die `.MXF` nur aus den
+Inhaltspaketen (System-Item, Bild, 8× Ton, ANC) – Kopf, Index und Fuß fehlen.
+Hier ist **kein Referenzclip nötig**: `vorlagen/mxf_abschliessen.py` geht die Pakete
+ab und lässt Bild und Ton von ffmpeg ohne Neukodierung in eine abgeschlossene MXF
+verpacken, Timecode inklusive.
+```
+py vorlagen/mxf_scan.py <defekt.MXF>                      # zählt Pakete, prüft Grenzen
+py vorlagen/mxf_abschliessen.py <defekt.MXF> <ziel.mxf>   # Ziel auf anderem Laufwerk
+```
+Erfolgsfall: 30-GB-Clip, UHD 25p → 23.980 Bilder (15:59 min), 0 Dekodierfehler,
+nur das letzte angefangene Bild fällt weg. Details und Fallstricke in `SKILL.md`.

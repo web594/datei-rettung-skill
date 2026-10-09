@@ -1,6 +1,6 @@
 ---
 name: datei-rettung
-description: Beschädigte Kamera-Videodatei retten, v. a. Sony XAVC S / MP4-MOV nach Akku-Ausfall während der Aufnahme (Datei unlesbar, weil moov-Index fehlt und/oder Dateianfang überschrieben ist). Nutzen bei "Akku ist während der Aufnahme ausgefallen", "Datei beschädigt/kaputt/unlesbar", "MP4 wiederherstellen/reparieren", "Clip lässt sich nicht öffnen", "corrupt". Rekonstruiert den Index aus einem gesunden Nachbarclip derselben Kamera. Werkzeuge in vorlagen/.
+description: Beschädigte Kamera-Videodatei retten – Sony XAVC S / MP4-MOV nach Akku-Ausfall während der Aufnahme (moov-Index fehlt und/oder Dateianfang überschrieben) sowie nicht abgeschlossene Sony-MXF (FS7 II, XAVC-Intra: Kopf/Index/Fuß fehlen). Nutzen bei "Akku ist während der Aufnahme ausgefallen", "Datei beschädigt/kaputt/unlesbar", "MP4 wiederherstellen/reparieren", "Clip lässt sich nicht öffnen", "corrupt", "MXF nicht abgeschlossen", "Aufnahme nicht finalisiert". Rekonstruiert den Index aus einem gesunden Nachbarclip derselben Kamera. Werkzeuge in vorlagen/.
 ---
 
 # Beschädigte Videodatei retten (wunder-media)
@@ -25,6 +25,7 @@ mit Python (`py`-Launcher) + ffmpeg, beides vorhanden.
 - `mp4tables.py <ref>` — Index-Tabellen + **Chunk-Interleave** der Referenz.
 - `gop_pattern.py <ref>` — ctts/stss (B-Frame-Reorder + Sync-Frames).
 - `headers.py <ref>` — mvhd/tkhd/mdhd/elst-Felder (Timescales, Dauern, media_time).
+- `mxf_klv.py`, `mxf_scan.py`, `mxf_abschliessen.py` — für nicht abgeschlossene Sony-MXF (siehe Sonderfall unten).
 
 ## Ablauf
 
@@ -95,3 +96,35 @@ der Datei große Null-/Müllbereiche (überschriebene Cluster), ist dieser Teil 
 dann nur das Stück bis zur ersten großen Lücke rettbar. Ein anderer Codec/Container
 (AVCHD `.MTS`, XAVC-Intra, HEVC) braucht angepasste Konstanten bzw. eine andere
 NAL-Logik — dann Schritt 2 gründlich neu machen.
+
+## Sonderfall: Sony-MXF (FS7 II, XAVC-Intra) nicht abgeschlossen
+
+Erkennbar an: große `.MXF` ohne `…M01.XML`, daneben `.RSV`, `.SLI`, `…I02.KLV`,
+im Kartenstamm `_SLVG*.SLV`; ffprobe erkennt nur „h264" ohne Dauer. Die Datei beginnt
+direkt mit den Inhaltspaketen (System-Item, Bild, 8× Ton, ANC, je auf 512 Byte
+aufgefüllt) – Kopf, Index und Fuß fehlen. **Kein Referenzclip nötig.**
+
+```
+py vorlagen/mxf_klv.py  <defekt.MXF>            # Aufbau ansehen
+py vorlagen/mxf_scan.py <defekt.MXF>            # alle Pakete zählen, Grenzen prüfen
+py vorlagen/mxf_abschliessen.py <defekt.MXF> <ziel.mxf> [--limit=150]
+```
+ffmpeg wird über die Umgebungsvariable `FFMPEG` oder den Suchpfad gefunden.
+
+> Bestätigter Erfolg: Sony FS7 II, XAVC-Intra UHD 25p, 30-GB-Clip → 23.980 Bilder
+> (15:59 min), Timecode übernommen, 0 Dekodierfehler; nur das letzte angefangene
+> Bild fällt weg.
+
+Fallstricke:
+- **Die Karte ist oft die einzige Kopie**, und Laufwerksbuchstaben rücken nach, wenn
+  Platten abgesteckt werden – vor jedem Schreiben prüfen, was hinter dem Buchstaben
+  steckt. Das Werkzeug verweigert die Ausgabe auf dem Quell-Laufwerk.
+- **Nicht Rohstrom + Ton in einem ffmpeg-Aufruf verpacken:** ffmpeg hält dann das
+  ganze Bild im Speicher („Cannot allocate memory" nach ~23 GB, Rückgabe trotzdem 0).
+  Erst nur Bild → MXF, dann Bild-MXF + Ton (40 MB statt 4,5 GB). Per Pipe füttern
+  hilft nicht; `-fflags +genpts` auch nicht.
+- Die Dateigröße der Ausgabe ist unter Windows während des Schreibens 0 – nicht als
+  Fortschritt oder Bremse verwenden.
+- Platzbedarf auf dem Ziel: ca. 3× Dateigröße (Rohstrom, Bild-MXF, Ergebnis).
+- War die Karte wieder in der Kamera und es wurde neu aufgenommen, sind die
+  `_SLVG`-Dateien weg – dann nicht mehr auf die Kamera-Wiederherstellung hoffen.
